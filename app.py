@@ -1,18 +1,26 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from scipy.optimize import brentq
 import numpy as np
 import os
+from PIL import Image
 
 # ── Page config ───────────────────────────────────────────────────────────────
+icon = Image.open(os.path.join(os.path.dirname(__file__), "logo.png")).convert("RGBA")
+
+data = icon.getdata()
+new_data = [
+    (r, g, b, 0) if (r > 200 and g > 200 and b > 200) else (r, g, b, a)
+    for r, g, b, a in data
+]
+icon.putdata(new_data)
+
 st.set_page_config(
     page_title="GCV vs LTV Pipeline Dashboard",
-    page_icon="📊",
+    page_icon=icon,
     layout="wide",
+    initial_sidebar_state="expanded",
 )
-
 # ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -20,6 +28,15 @@ st.markdown("""
 html, body, [class*="css"] { font-family: 'Syne', sans-serif; }
 .main { background-color: #0d0f14; }
 .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+
+[data-testid="stSidebar"] {
+    background-color: #0d0f14;
+    border-right: 1px solid #252a3a;
+}
+[data-testid="stSidebar"] .block-container {
+    padding-top: 1.5rem;
+}
+
 h1 {
     font-family: 'Syne', sans-serif !important;
     font-weight: 800 !important;
@@ -68,6 +85,23 @@ h3 {
     letter-spacing: 0.1em;
     margin-bottom: 4px;
 }
+.sidebar-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 3px;
+    margin-top: 12px;
+}
+.sidebar-section {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.62rem;
+    color: #5b8dee;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    margin: 1.25rem 0 0.4rem 0;
+}
 .section-header {
     font-family: 'DM Mono', monospace;
     font-size: 0.65rem;
@@ -93,6 +127,8 @@ except FileNotFoundError:
     st.stop()
 
 # ── Column selection ──────────────────────────────────────────────────────────
+SURVIVAL_MONTH_COLS = [f"survival_rate_m{m}_pct" for m in range(1, 13)]
+
 df = raw[[
     "dim_agent", "dim_customer", "dim_product",
     "dim_agent_field", "dim_customer_field", "dim_product_field",
@@ -105,6 +141,7 @@ df = raw[[
     "total_gcv", "total_derived_ltv", "total_gap",
     "avg_upfront_realized", "avg_residual_per_month",
     "avg_expected_trailing", "pct_rank_delta",
+    *SURVIVAL_MONTH_COLS,
 ]].copy()
 
 df.columns = [
@@ -119,6 +156,7 @@ df.columns = [
     "total_gcv", "total_ltv", "total_gap",
     "avg_upfront_realized", "avg_residual_per_month",
     "avg_expected_trailing", "pct_rank_delta",
+    *[f"surv_{m}" for m in range(1, 13)],
 ]
 
 numeric_cols = [
@@ -127,50 +165,17 @@ numeric_cols = [
     "avg_gap", "avg_gap_pct_of_gcv", "orders_gcv_above_ltv", "orders_ltv_above_gcv",
     "total_gcv", "total_ltv", "total_gap",
     "avg_upfront_realized", "avg_residual_per_month", "avg_expected_trailing", "pct_rank_delta",
+    *[f"surv_{m}" for m in range(1, 13)],
 ]
 for col in numeric_cols:
     df[col] = pd.to_numeric(df[col], errors="coerce")
 
-df = df.dropna(subset=["avg_gcv", "avg_ltv", "total_orders", "gcv_pct_rank", "ltv_pct_rank",
-                        "activation_rate", "first_payment_rate", "avg_survival_sum"])
+df["surv_activation"] = df["activation_rate"]
 
-# ── Survival curve helper ─────────────────────────────────────────────────────
-def compute_survival_pct(activation_rate, first_payment_rate, avg_survival_sum, month):
-    if month == "activation":
-        return activation_rate
-    if month == "billpay":
-        return first_payment_rate
-
-    fpr = first_payment_rate / 100.0
-    s_sum = avg_survival_sum
-
-    def f(p):
-        if abs(p - 1.0) < 1e-9:
-            return fpr * 12.0 - s_sum
-        return fpr * (1.0 - p ** 12) / (1.0 - p) - s_sum
-
-    try:
-        p = min(brentq(f, 0.5, 1.05), 1.0)
-    except Exception:
-        p = 1.0
-
-    return fpr * (p ** (month - 1)) * 100.0
-
-
-@st.cache_data
-def add_survival_columns(df_in):
-    df_out = df_in.copy()
-    for month in ["activation", "billpay"] + list(range(1, 13)):
-        col = f"surv_{month}"
-        df_out[col] = df_out.apply(
-            lambda r: compute_survival_pct(
-                r["activation_rate"], r["first_payment_rate"], r["avg_survival_sum"], month
-            ),
-            axis=1,
-        )
-    return df_out
-
-df = add_survival_columns(df)
+df = df.dropna(subset=[
+    "avg_gcv", "avg_ltv", "total_orders", "gcv_pct_rank", "ltv_pct_rank",
+    "activation_rate", "first_payment_rate",
+])
 
 # ── Category field label maps ─────────────────────────────────────────────────
 AGENT_FIELD_LABELS = {
@@ -201,20 +206,90 @@ PALETTES = [
     "#f87171", "#34d399", "#fbbf24", "#60a5fa", "#c084fc",
 ]
 
-def hex_to_rgba(hex_color, alpha=0.2):
-    """Convert a #rrggbb hex string to rgba() that Plotly accepts."""
-    h = hex_color.lstrip("#")
-    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-    return f"rgba({r},{g},{b},{alpha})"
-
 SURVIVAL_OPTIONS = {
-    "Activation":   "activation",
-    "Bill Pay":     "billpay",
+    "Activation": "activation",
     "Month 1":  1,  "Month 2":  2,  "Month 3":  3,
     "Month 4":  4,  "Month 5":  5,  "Month 6":  6,
     "Month 7":  7,  "Month 8":  8,  "Month 9":  9,
     "Month 10": 10, "Month 11": 11, "Month 12": 12,
 }
+
+# ── Sidebar — global grouping & filters only ──────────────────────────────────
+with st.sidebar:
+    st.markdown("# Filters")
+    st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
+
+    st.markdown("<p class='sidebar-section'>Grouping</p>", unsafe_allow_html=True)
+
+    st.markdown("<p class='sidebar-label'>Agent Category</p>", unsafe_allow_html=True)
+    sel_agent = st.selectbox("Agent Category", agent_options, label_visibility="collapsed")
+
+    st.markdown("<p class='sidebar-label'>Customer Category</p>", unsafe_allow_html=True)
+    sel_customer = st.selectbox("Customer Category", customer_options, label_visibility="collapsed")
+
+    st.markdown("<p class='sidebar-label'>Color By</p>", unsafe_allow_html=True)
+    sel_color_by = st.selectbox("Color By", list(COLOR_BY_OPTIONS.keys()), index=2, label_visibility="collapsed")
+
+    st.markdown("<p class='sidebar-section'>Filter Values</p>", unsafe_allow_html=True)
+
+    def _vals_for(field_col, val_col, field_key):
+        return sorted(df[df[field_col] == field_key][val_col].dropna().unique().tolist())
+
+    if sel_agent != "All":
+        agent_field_key = AGENT_LABEL_TO_FIELD[sel_agent]
+        agent_val_opts  = _vals_for("agent_field", "agent", agent_field_key)
+    else:
+        agent_val_opts  = sorted(df["agent"].dropna().unique().tolist())
+
+    if sel_customer != "All":
+        customer_field_key = CUSTOMER_LABEL_TO_FIELD[sel_customer]
+        customer_val_opts  = _vals_for("customer_field", "customer", customer_field_key)
+    else:
+        customer_val_opts  = sorted(df["customer"].dropna().unique().tolist())
+
+    label = f"Agent Value{' · ' + sel_agent if sel_agent != 'All' else ''}"
+    st.markdown(f"<p class='sidebar-label'>{label}</p>", unsafe_allow_html=True)
+    sel_agent_val = st.multiselect(
+        "Agent Value", agent_val_opts,
+        default=None, placeholder="All values", label_visibility="collapsed",
+    )
+
+    label = f"Customer Value{' · ' + sel_customer if sel_customer != 'All' else ''}"
+    st.markdown(f"<p class='sidebar-label'>{label}</p>", unsafe_allow_html=True)
+    sel_customer_val = st.multiselect(
+        "Customer Value", customer_val_opts,
+        default=None, placeholder="All values", label_visibility="collapsed",
+    )
+
+    st.markdown("<p class='sidebar-label'>Product Value</p>", unsafe_allow_html=True)
+    all_product_vals = sorted(df["product"].dropna().unique().tolist())
+    sel_product_val = st.multiselect(
+        "Product Value", all_product_vals,
+        default=None, placeholder="All values", label_visibility="collapsed",
+    )
+
+    st.markdown("<div style='margin-top: 2rem;'></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<p style='font-family:DM Mono,monospace;font-size:0.6rem;color:#3a4060;"
+        f"text-transform:uppercase;letter-spacing:0.08em;'>"
+        f"{len(df):,} rows loaded</p>",
+        unsafe_allow_html=True,
+    )
+
+# ── Filter data ───────────────────────────────────────────────────────────────
+filtered = df.copy()
+
+if sel_agent != "All":
+    filtered = filtered[filtered["agent_field"] == AGENT_LABEL_TO_FIELD[sel_agent]]
+if sel_customer != "All":
+    filtered = filtered[filtered["customer_field"] == CUSTOMER_LABEL_TO_FIELD[sel_customer]]
+
+if sel_agent_val:
+    filtered = filtered[filtered["agent"].isin(sel_agent_val)]
+if sel_customer_val:
+    filtered = filtered[filtered["customer"].isin(sel_customer_val)]
+if sel_product_val:
+    filtered = filtered[filtered["product"].isin(sel_product_val)]
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("# GCV vs LTV Pipeline")
@@ -226,107 +301,14 @@ st.markdown(
 )
 st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
-# ── Shared filters — row 1: category selectors + color by ───────────────────
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    st.markdown("<p class='plot-label'>Agent Category</p>", unsafe_allow_html=True)
-    sel_agent = st.selectbox("Agent Category", agent_options, label_visibility="collapsed")
-
-with col2:
-    st.markdown("<p class='plot-label'>Customer Category</p>", unsafe_allow_html=True)
-    sel_customer = st.selectbox("Customer Category", customer_options, label_visibility="collapsed")
-
-with col3:
-    st.markdown("<p class='plot-label'>Product Type</p>", unsafe_allow_html=True)
-    product_values = ["All"] + sorted(df["product"].dropna().unique().tolist())
-    sel_product = st.selectbox("Product Type", product_values, label_visibility="collapsed")
-
-with col4:
-    st.markdown("<p class='plot-label'>Color By</p>", unsafe_allow_html=True)
-    sel_color_by = st.selectbox("Color By", list(COLOR_BY_OPTIONS.keys()), label_visibility="collapsed")
-
-# ── Shared filters — row 2: value sub-filters (context-sensitive) ────────────
-# Derive available values for each dimension given the category selection above
-def _vals_for(field_col, val_col, field_key):
-    """Return sorted unique values in val_col where field_col == field_key."""
-    return sorted(df[df[field_col] == field_key][val_col].dropna().unique().tolist())
-
-if sel_agent != "All":
-    agent_field_key  = AGENT_LABEL_TO_FIELD[sel_agent]
-    agent_val_opts   = ["All"] + _vals_for("agent_field", "agent", agent_field_key)
-else:
-    agent_val_opts   = ["All"] + sorted(df["agent"].dropna().unique().tolist())
-
-if sel_customer != "All":
-    customer_field_key  = CUSTOMER_LABEL_TO_FIELD[sel_customer]
-    customer_val_opts   = ["All"] + _vals_for("customer_field", "customer", customer_field_key)
-else:
-    customer_val_opts   = ["All"] + sorted(df["customer"].dropna().unique().tolist())
-
-v1, v2, v3 = st.columns(3)
-
-with v1:
-    label = f"Agent Value{' · ' + sel_agent if sel_agent != 'All' else ''}"
-    st.markdown(f"<p class='plot-label'>{label}</p>", unsafe_allow_html=True)
-    sel_agent_val = st.multiselect(
-        "Agent Value", agent_val_opts[1:],
-        default=None,
-        placeholder="All values",
-        label_visibility="collapsed",
-    )
-
-with v2:
-    label = f"Customer Value{' · ' + sel_customer if sel_customer != 'All' else ''}"
-    st.markdown(f"<p class='plot-label'>{label}</p>", unsafe_allow_html=True)
-    sel_customer_val = st.multiselect(
-        "Customer Value", customer_val_opts[1:],
-        default=None,
-        placeholder="All values",
-        label_visibility="collapsed",
-    )
-
-with v3:
-    st.markdown("<p class='plot-label'>Product Value</p>", unsafe_allow_html=True)
-    all_product_vals = sorted(df["product"].dropna().unique().tolist())
-    # if a product type category filter is active, restrict options
-    if sel_product != "All":
-        all_product_vals = [sel_product]
-    sel_product_val = st.multiselect(
-        "Product Value", all_product_vals,
-        default=None,
-        placeholder="All values",
-        label_visibility="collapsed",
-    )
-
-# ── Filter data ───────────────────────────────────────────────────────────────
-filtered = df.copy()
-
-# Category-level filters
-if sel_agent != "All":
-    filtered = filtered[filtered["agent_field"] == AGENT_LABEL_TO_FIELD[sel_agent]]
-if sel_customer != "All":
-    filtered = filtered[filtered["customer_field"] == CUSTOMER_LABEL_TO_FIELD[sel_customer]]
-if sel_product != "All":
-    filtered = filtered[filtered["product"] == sel_product]
-
-# Value-level sub-filters
-if sel_agent_val:
-    filtered = filtered[filtered["agent"].isin(sel_agent_val)]
-if sel_customer_val:
-    filtered = filtered[filtered["customer"].isin(sel_customer_val)]
-if sel_product_val:
-    filtered = filtered[filtered["product"].isin(sel_product_val)]
-
 # ── Stats row ─────────────────────────────────────────────────────────────────
-st.markdown("<div style='margin: 1rem 0 0.5rem 0;'></div>", unsafe_allow_html=True)
-s1, s2, s3, s4, s5 = st.columns(5)
+n_points = len(filtered)
+avg_gcv  = filtered["avg_gcv"].mean()         if n_points > 0 else None
+avg_ltv  = filtered["avg_ltv"].mean()         if n_points > 0 else None
+avg_gap  = filtered["avg_gap"].mean()         if n_points > 0 else None
+avg_act  = filtered["activation_rate"].mean() if n_points > 0 else None
 
-n_points  = len(filtered)
-avg_gcv   = filtered["avg_gcv"].mean()  if n_points > 0 else None
-avg_ltv   = filtered["avg_ltv"].mean()  if n_points > 0 else None
-avg_gap   = filtered["avg_gap"].mean()  if n_points > 0 else None
-avg_act   = filtered["activation_rate"].mean() if n_points > 0 else None
+s1, s2, s3, s4, s5 = st.columns(5)
 
 with s1:
     st.markdown(f"""<div class="stat-container">
@@ -347,7 +329,7 @@ with s3:
     </div>""", unsafe_allow_html=True)
 with s4:
     gap_sign = "+" if (avg_gap or 0) > 0 else ""
-    val = f"{gap_sign}${avg_gap:.0f}" if avg_gap is not None else "—"
+    val   = f"{gap_sign}${avg_gap:.0f}" if avg_gap is not None else "—"
     color = "#e05c8a" if (avg_gap or 0) > 0 else "#3dd68c"
     st.markdown(f"""<div class="stat-container">
         <div class="stat-value" style="color:{color};">{val}</div>
@@ -462,14 +444,88 @@ else:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 2 — Survival Rate vs Avg GCV
+# SECTION 2 — Survival Curve Fan
 # ═══════════════════════════════════════════════════════════════════════════════
 st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
-st.markdown("<p class='section-header'>02 · Survival Analysis</p>", unsafe_allow_html=True)
+st.markdown("<p class='section-header'>02 · Survival Curve Fan</p>", unsafe_allow_html=True)
+st.markdown("### Survival Curve Fan")
+st.markdown(
+    "<p style='font-family:DM Mono,monospace;font-size:0.68rem;color:#6b7280;margin-top:-8px;margin-bottom:16px;'>"
+    "Monthly survival trajectory per group — activation through month 12</p>",
+    unsafe_allow_html=True,
+)
+
+if n_points == 0:
+    st.warning("No data matches the selected filters.")
+else:
+    surv_stage_cols = ["activation"] + list(range(1, 13))
+    surv_x_labels   = ["Act."] + [f"M{n}" for n in range(1, 13)]
+
+    fig2 = go.Figure()
+
+    overall_median = [filtered[f"surv_{s}"].median() for s in surv_stage_cols]
+
+    fig2.add_trace(go.Scatter(
+        x=surv_x_labels,
+        y=overall_median,
+        mode="lines",
+        name="Overall Median",
+        line=dict(color="#3a4060", width=2, dash="dot"),
+        hovertemplate="Overall median: %{y:.1f}%<extra></extra>",
+    ))
+
+    for val in color_values:
+        subset  = filtered[filtered[color_col] == val]
+        if subset.empty:
+            continue
+        weights = subset["total_orders"]
+        w_sum   = weights.sum()
+
+        curve = []
+        for stage in surv_stage_cols:
+            col   = f"surv_{stage}"
+            wvals = subset[col]
+            wmean = (wvals * weights).sum() / w_sum if w_sum > 0 else wvals.mean()
+            curve.append(wmean)
+
+        fig2.add_trace(go.Scatter(
+            x=surv_x_labels,
+            y=curve,
+            mode="lines+markers",
+            name=str(val),
+            line=dict(color=color_map[val], width=2.5),
+            marker=dict(color=color_map[val], size=7),
+            hovertemplate=f"<b>{val}</b><br>Stage: %{{x}}<br>Survival: %{{y:.1f}}%<extra></extra>",
+        ))
+
+    fig2.update_layout(
+        **COMMON_LAYOUT,
+        height=420,
+        legend=COMMON_LEGEND,
+        xaxis=dict(
+            title=dict(text="SURVIVAL STAGE", font=dict(size=11, color="#6b7280")),
+            **AXIS_STYLE,
+        ),
+        yaxis=dict(
+            title=dict(text="SURVIVAL RATE (%)", font=dict(size=11, color="#6b7280")),
+            range=[0, 105],
+            ticksuffix="%",
+            **AXIS_STYLE,
+        ),
+    )
+    st.plotly_chart(fig2, use_container_width=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 3 — Survival Rate vs Avg GCV
+# ═══════════════════════════════════════════════════════════════════════════════
+st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
+st.markdown("<p class='section-header'>03 · Survival Analysis</p>", unsafe_allow_html=True)
 st.markdown("### Survival Rate vs Avg GCV")
 
-surv_col2, _ = st.columns([1, 2])
-with surv_col2:
+# ── Chart-local control — lives here, not in the sidebar ─────────────────────
+surv_col3, _ = st.columns([1, 2])
+with surv_col3:
     st.markdown("<p class='plot-label'>Survival Stage</p>", unsafe_allow_html=True)
     sel_survival = st.selectbox(
         "Survival Stage",
@@ -491,7 +547,7 @@ else:
     x_min  = max(0, x_vals.min() - 5)
     x_max  = x_vals.max() + 5
 
-    fig2 = go.Figure()
+    fig3 = go.Figure()
 
     for val in color_values:
         subset = filtered[filtered[color_col] == val]
@@ -505,7 +561,7 @@ else:
             f"Grouping: {r.combo_key}"
             for r in subset.itertuples()
         ]
-        fig2.add_trace(go.Scatter(
+        fig3.add_trace(go.Scatter(
             x=subset["avg_gcv"],
             y=subset[surv_col],
             mode="markers",
@@ -516,7 +572,7 @@ else:
             showlegend=True,
         ))
 
-    fig2.update_layout(
+    fig3.update_layout(
         **COMMON_LAYOUT,
         height=480,
         legend=COMMON_LEGEND,
@@ -529,82 +585,6 @@ else:
         yaxis=dict(
             title=dict(text=f"{sel_survival.upper()} SURVIVAL RATE (%)", font=dict(size=11, color="#6b7280")),
             range=[y_min, y_max],
-            ticksuffix="%",
-            **AXIS_STYLE,
-        ),
-    )
-    st.plotly_chart(fig2, use_container_width=True)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 3 — Survival Curve Fan (NEW)
-# ═══════════════════════════════════════════════════════════════════════════════
-st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
-st.markdown("### Survival Curve Fan")
-st.markdown(
-    "<p style='font-family:DM Mono,monospace;font-size:0.68rem;color:#6b7280;margin-top:-8px;margin-bottom:16px;'>"
-    "Monthly survival trajectory per group — activation through month 12</p>",
-    unsafe_allow_html=True,
-)
-
-if n_points == 0:
-    st.warning("No data matches the selected filters.")
-else:
-    # Aggregate by color dimension — weighted average of survival by total_orders
-    surv_stage_cols = ["activation", "billpay"] + list(range(1, 13))
-    surv_x_labels   = ["Act.", "Bill\nPay"] + [f"M{n}" for n in range(1, 13)]
-
-    fig3 = go.Figure()
-
-    # Add a shaded reference band for overall median trajectory
-    all_surv_vals = []
-    for stage in surv_stage_cols:
-        col = f"surv_{stage}"
-        all_surv_vals.append(filtered[col].median())
-
-    fig3.add_trace(go.Scatter(
-        x=surv_x_labels,
-        y=all_surv_vals,
-        mode="lines",
-        name="Overall Median",
-        line=dict(color="#3a4060", width=2, dash="dot"),
-        hovertemplate="Overall median: %{y:.1f}%<extra></extra>",
-    ))
-
-    for val in color_values:
-        subset = filtered[filtered[color_col] == val]
-        if subset.empty:
-            continue
-        # Weighted mean by total_orders
-        weights = subset["total_orders"]
-        curve   = []
-        for stage in surv_stage_cols:
-            col   = f"surv_{stage}"
-            wvals = subset[col]
-            wmean = (wvals * weights).sum() / weights.sum() if weights.sum() > 0 else wvals.mean()
-            curve.append(wmean)
-
-        fig3.add_trace(go.Scatter(
-            x=surv_x_labels,
-            y=curve,
-            mode="lines+markers",
-            name=str(val),
-            line=dict(color=color_map[val], width=2.5),
-            marker=dict(color=color_map[val], size=7),
-            hovertemplate=f"<b>{val}</b><br>Stage: %{{x}}<br>Survival: %{{y:.1f}}%<extra></extra>",
-        ))
-
-    fig3.update_layout(
-        **COMMON_LAYOUT,
-        height=420,
-        legend=COMMON_LEGEND,
-        xaxis=dict(
-            title=dict(text="SURVIVAL STAGE", font=dict(size=11, color="#6b7280")),
-            **AXIS_STYLE,
-        ),
-        yaxis=dict(
-            title=dict(text="SURVIVAL RATE (%)", font=dict(size=11, color="#6b7280")),
-            range=[0, 105],
             ticksuffix="%",
             **AXIS_STYLE,
         ),
