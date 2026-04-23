@@ -39,10 +39,24 @@ h1 {
     letter-spacing: -0.03em !important;
     color: #e8eaf0 !important;
 }
+h2 {
+    font-family: 'Syne', sans-serif !important;
+    font-weight: 700 !important;
+    color: #e8eaf0 !important;
+    margin-top: 2rem !important;
+    margin-bottom: 0.5rem !important;
+}
 h3 {
     font-family: 'Syne', sans-serif !important;
     font-weight: 700 !important;
     color: #e8eaf0 !important;
+    margin-bottom: 0.25rem !important;
+}
+h4 {
+    font-family: 'Syne', sans-serif !important;
+    font-weight: 600 !important;
+    color: #c4c8d8 !important;
+    margin-top: 1.25rem !important;
     margin-bottom: 0.25rem !important;
 }
 .stat-container {
@@ -106,6 +120,37 @@ h3 {
     letter-spacing: 0.15em;
     margin: 0 0 0.5rem 0;
 }
+/* Methodology tab prose styling */
+.methodology-body p, .methodology-body li {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.95rem;
+    color: #c4c8d8;
+    line-height: 1.75;
+}
+.methodology-body ul {
+    padding-left: 1.5rem;
+    margin-bottom: 1rem;
+}
+.methodology-body strong {
+    color: #e8eaf0;
+}
+.methodology-body hr {
+    border: none;
+    border-top: 1px solid #252a3a;
+    margin: 2rem 0;
+}
+.method-callout {
+    background: #13161e;
+    border: 1px solid #252a3a;
+    border-left: 3px solid #5b8dee;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 1rem 0 1.5rem 0;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    color: #8b9bbf;
+    line-height: 1.6;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -122,7 +167,7 @@ SURV_COLS      = [f"survived_m{m}" for m in range(1, 13)]
 @st.cache_data(ttl=3600)
 def load_ltv(path):
     df = pd.read_csv(path)
-    df = df[df["partner_name"] != "Atlantex Power"]          # exclude Atlantex
+    df = df[df["partner_name"] != "Atlantex Power"]
     for col in ["order_date_est", "activation_date", "first_payment_date", "end_date"]:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce")
@@ -140,7 +185,7 @@ def load_ltv(path):
 @st.cache_data(ttl=3600)
 def load_survival(path):
     df = pd.read_csv(path)
-    df = df[df["partner_name"] != "Atlantex Power"]          # exclude Atlantex
+    df = df[df["partner_name"] != "Atlantex Power"]
     for col in ["order_date_est", "call_date", "activation_date",
                 "first_payment_date", "end_date", "hire_date"]:
         if col in df.columns:
@@ -235,7 +280,7 @@ def make_legend(title_text):
     )
 
 # =============================================================================
-# SIDEBAR
+# SIDEBAR  (always visible — controls dashboard tab only)
 # =============================================================================
 
 with st.sidebar:
@@ -272,54 +317,46 @@ with st.sidebar:
     product_col  = PRODUCT_DIMS[sel_product_dim]
     customer_col = CUSTOMER_DIMS[sel_customer_dim]
 
+    def labeled_opts(df, col, prefix):
+        return [f"{prefix} · {v}" for v in sorted(df[col].dropna().unique().tolist())]
+
+    agent_opts = (
+        labeled_opts(ltv_raw, "center_location",    "Center")
+      + labeled_opts(ltv_raw, "conversion_quartile","Conv. Quartile")
+      + labeled_opts(ltv_raw, "survival_quartile",  "Surv. Quartile")
+      + labeled_opts(ltv_raw, "tenure_category",    "Tenure")
+    )
+    product_opts = (
+        labeled_opts(ltv_raw, "sold_product_type", "Plan Type")
+      + labeled_opts(ltv_raw, "partner_name",      "Provider")
+    )
+    customer_opts = (
+        labeled_opts(ltv_raw, "mover_switcher",     "Mover/Switcher")
+      + labeled_opts(ltv_raw, "brand_category",     "Brand")
+      + labeled_opts(ltv_raw, "site_serp_category", "Site/SERP")
+      + labeled_opts(ltv_raw, "usage_band",         "Usage Band")
+      + labeled_opts(ltv_raw, "consistent_usage",   "Consistent Usage")
+    )
+
     st.markdown("<p class='sidebar-section'>Filter Values</p>", unsafe_allow_html=True)
 
-    def _opts(df, col):
-        return sorted(df[col].dropna().unique().tolist()) if col in df.columns else []
+    st.markdown("<p class='sidebar-label'>Agent</p>", unsafe_allow_html=True)
+    sel_agent_vals = st.multiselect(
+        "Agent", agent_opts, default=[], placeholder="All agent values",
+        label_visibility="collapsed",
+    )
 
-    st.markdown("<p class='sidebar-label'>Center</p>", unsafe_allow_html=True)
-    sel_center = st.multiselect("Center", _opts(ltv_raw, "center_location"),
-                                default=[], placeholder="All", label_visibility="collapsed")
+    st.markdown("<p class='sidebar-label'>Product</p>", unsafe_allow_html=True)
+    sel_product_vals = st.multiselect(
+        "Product", product_opts, default=[], placeholder="All product values",
+        label_visibility="collapsed",
+    )
 
-    st.markdown("<p class='sidebar-label'>Provider</p>", unsafe_allow_html=True)
-    sel_provider = st.multiselect("Provider", _opts(ltv_raw, "partner_name"),
-                                  default=[], placeholder="All", label_visibility="collapsed")
-
-    st.markdown("<p class='sidebar-label'>Plan Type</p>", unsafe_allow_html=True)
-    sel_plan = st.multiselect("Plan Type", _opts(ltv_raw, "sold_product_type"),
-                              default=[], placeholder="All", label_visibility="collapsed")
-
-    st.markdown("<p class='sidebar-label'>Mover / Switcher</p>", unsafe_allow_html=True)
-    sel_mov = st.multiselect("Mover / Switcher", _opts(ltv_raw, "mover_switcher"),
-                             default=[], placeholder="All", label_visibility="collapsed")
-
-    st.markdown("<p class='sidebar-label'>Brand Category</p>", unsafe_allow_html=True)
-    sel_brand = st.multiselect("Brand Category", _opts(ltv_raw, "brand_category"),
-                               default=[], placeholder="All", label_visibility="collapsed")
-
-    st.markdown("<p class='sidebar-label'>Site / SERP</p>", unsafe_allow_html=True)
-    sel_serp = st.multiselect("Site / SERP", _opts(ltv_raw, "site_serp_category"),
-                              default=[], placeholder="All", label_visibility="collapsed")
-
-    st.markdown("<p class='sidebar-label'>Conversion Quartile</p>", unsafe_allow_html=True)
-    sel_cq = st.multiselect("Conversion Quartile", _opts(ltv_raw, "conversion_quartile"),
-                            default=[], placeholder="All", label_visibility="collapsed")
-
-    st.markdown("<p class='sidebar-label'>Survival Quartile</p>", unsafe_allow_html=True)
-    sel_sq = st.multiselect("Survival Quartile", _opts(ltv_raw, "survival_quartile"),
-                            default=[], placeholder="All", label_visibility="collapsed")
-
-    st.markdown("<p class='sidebar-label'>Tenure</p>", unsafe_allow_html=True)
-    sel_tenure = st.multiselect("Tenure", _opts(ltv_raw, "tenure_category"),
-                                default=[], placeholder="All", label_visibility="collapsed")
-
-    st.markdown("<p class='sidebar-label'>Usage Band</p>", unsafe_allow_html=True)
-    sel_usage = st.multiselect("Usage Band", _opts(ltv_raw, "usage_band"),
-                               default=[], placeholder="All", label_visibility="collapsed")
-
-    st.markdown("<p class='sidebar-label'>Consistent Usage</p>", unsafe_allow_html=True)
-    sel_consist = st.multiselect("Consistent Usage", _opts(ltv_raw, "consistent_usage"),
-                                 default=[], placeholder="All", label_visibility="collapsed")
+    st.markdown("<p class='sidebar-label'>Customer</p>", unsafe_allow_html=True)
+    sel_customer_vals = st.multiselect(
+        "Customer", customer_opts, default=[], placeholder="All customer values",
+        label_visibility="collapsed",
+    )
 
     st.markdown("<div style='margin-top:2rem;'></div>", unsafe_allow_html=True)
     st.markdown(
@@ -333,49 +370,66 @@ with st.sidebar:
 # APPLY FILTERS
 # =============================================================================
 
-FILTER_MAP = [
-    ("center_location",    sel_center),
-    ("partner_name",       sel_provider),
-    ("sold_product_type",  sel_plan),
-    ("mover_switcher",     sel_mov),
-    ("brand_category",     sel_brand),
-    ("site_serp_category", sel_serp),
-    ("conversion_quartile", sel_cq),
-    ("survival_quartile",  sel_sq),
-    ("tenure_category",    sel_tenure),
-    ("usage_band",         sel_usage),
-    ("consistent_usage",   sel_consist),
-]
+def build_col_filter(labeled_selections, prefix_col_map):
+    col_values = {}
+    for item in labeled_selections:
+        prefix, value = item.split(" · ", 1)
+        col = prefix_col_map.get(prefix)
+        if col:
+            col_values.setdefault(col, set()).add(value)
+    return col_values
+
+AGENT_PREFIX_MAP = {
+    "Center":          "center_location",
+    "Conv. Quartile":  "conversion_quartile",
+    "Surv. Quartile":  "survival_quartile",
+    "Tenure":          "tenure_category",
+}
+PRODUCT_PREFIX_MAP = {
+    "Plan Type": "sold_product_type",
+    "Provider":  "partner_name",
+}
+CUSTOMER_PREFIX_MAP = {
+    "Mover/Switcher":   "mover_switcher",
+    "Brand":            "brand_category",
+    "Site/SERP":        "site_serp_category",
+    "Usage Band":       "usage_band",
+    "Consistent Usage": "consistent_usage",
+}
 
 def apply_filters(df):
     d = df.copy()
-    for col, sel in FILTER_MAP:
-        if sel and col in d.columns:
-            d = d[d[col].isin(sel)]
+    for col_filters in [
+        build_col_filter(sel_agent_vals,    AGENT_PREFIX_MAP),
+        build_col_filter(sel_product_vals,  PRODUCT_PREFIX_MAP),
+        build_col_filter(sel_customer_vals, CUSTOMER_PREFIX_MAP),
+    ]:
+        for col, values in col_filters.items():
+            if col in d.columns:
+                d = d[d[col].isin(values)]
     return d
 
 ltv      = apply_filters(ltv_raw)
 survival = apply_filters(survival_raw)
 
 # =============================================================================
-# AGGREGATE  — one row per (agent_dim × product_dim × customer_dim)
-# for the scatter / survival fan which expect segment-level points
+# AGGREGATE
 # =============================================================================
 
 def aggregate_ltv(df, agent_col, product_col, customer_col):
     surv_means = {f"surv_m{m}": (f"survived_m{m}", "mean")
                   for m in range(1, 7) if f"survived_m{m}" in df.columns}
     agg_dict = {
-        "avg_gcv":          ("gcv",                 "mean"),
-        "avg_ltv":          ("derived_ltv",          "mean"),
-        "avg_trailing":     ("trailing_revenue",     "mean"),
-        "avg_upfront":      ("ltv_upfront_realized", "mean"),
-        "avg_gap":          ("gcv_ltv_gap",          "mean"),
-        "total_orders":     ("gcv",                  "count"),
-        "total_gcv":        ("gcv",                  "sum"),
-        "total_ltv":        ("derived_ltv",          "sum"),
-        "activation_rate":  ("activated_ind",        "mean"),
-        "first_pmt_rate":   ("first_payment_ind",    "mean"),
+        "avg_gcv":         ("gcv",                  "mean"),
+        "avg_ltv":         ("derived_ltv",           "mean"),
+        "avg_trailing":    ("trailing_revenue",      "mean"),
+        "avg_upfront":     ("ltv_upfront_realized",  "mean"),
+        "avg_gap":         ("gcv_ltv_gap",           "mean"),
+        "total_orders":    ("gcv",                   "count"),
+        "total_gcv":       ("gcv",                   "sum"),
+        "total_ltv":       ("derived_ltv",           "sum"),
+        "activation_rate": ("activated_ind",         "mean"),
+        "first_pmt_rate":  ("first_payment_ind",     "mean"),
         **surv_means,
     }
     grp = (
@@ -386,9 +440,8 @@ def aggregate_ltv(df, agent_col, product_col, customer_col):
         .rename(columns={agent_col: "agent_dim", product_col: "product_dim",
                          customer_col: "customer_dim"})
     )
-    # Percentile ranks within this aggregated view
-    grp["gcv_pct_rank"] = grp["avg_gcv"].rank(pct=True).round(4)
-    grp["ltv_pct_rank"] = grp["avg_ltv"].rank(pct=True).round(4)
+    grp["gcv_pct_rank"]   = grp["avg_gcv"].rank(pct=True).round(4)
+    grp["ltv_pct_rank"]   = grp["avg_ltv"].rank(pct=True).round(4)
     grp["pct_rank_delta"] = (grp["gcv_pct_rank"] - grp["ltv_pct_rank"]).round(4)
     return grp
 
@@ -415,7 +468,6 @@ def aggregate_survival(df, agent_col, product_col, customer_col):
 ltv_agg  = aggregate_ltv(ltv,      agent_col, product_col, customer_col)
 surv_agg = aggregate_survival(survival, agent_col, product_col, customer_col)
 
-# Color map — driven by the selected color-by column
 color_col    = COLOR_BY_OPTIONS[sel_color_by]
 color_values = sorted(ltv_agg[color_col].dropna().unique().tolist()) \
                if color_col in ltv_agg.columns else []
@@ -426,287 +478,283 @@ surv_color_values = sorted(surv_agg[color_col].dropna().unique().tolist()) \
 surv_color_map    = {v: PALETTES[i % len(PALETTES)] for i, v in enumerate(surv_color_values)}
 
 # =============================================================================
-# HEADER
+# TABS
 # =============================================================================
 
-st.markdown("# GCV vs LTV Pipeline")
-st.markdown(
-    f"<p style='font-family:DM Mono,monospace;font-size:0.72rem;color:#6b7280;"
-    f"letter-spacing:0.08em;text-transform:uppercase;margin-top:-12px;margin-bottom:8px;'>"
-    f"{sel_agent_dim} × {sel_product_dim} × {sel_customer_dim} · "
-    f"{len(ltv):,} LTV orders · {len(survival):,} survival orders</p>",
-    unsafe_allow_html=True,
-)
-st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
+tab_dashboard, tab_methodology = st.tabs(["📊  Dashboard", "📖  Methodology"])
 
 # =============================================================================
-# KPI STATS ROW
+# TAB 1 — DASHBOARD
 # =============================================================================
 
-n_seg      = len(ltv_agg)
-avg_gcv    = ltv_agg["avg_gcv"].mean()   if n_seg > 0 else None
-avg_ltv    = ltv_agg["avg_ltv"].mean()   if n_seg > 0 else None
-avg_gap    = ltv_agg["avg_gap"].mean()   if n_seg > 0 else None
-avg_act    = ltv["activated_ind"].mean() * 100 if len(ltv) > 0 else None
+with tab_dashboard:
 
-s1, s2, s3, s4, s5 = st.columns(5)
+    st.markdown("# GCV vs LTV Pipeline")
+    st.markdown(
+        f"<p style='font-family:DM Mono,monospace;font-size:0.72rem;color:#6b7280;"
+        f"letter-spacing:0.08em;text-transform:uppercase;margin-top:-12px;margin-bottom:8px;'>"
+        f"{sel_agent_dim} × {sel_product_dim} × {sel_customer_dim} · "
+        f"{len(ltv):,} LTV orders · {len(survival):,} survival orders</p>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
-with s1:
-    st.markdown(f"""<div class="stat-container">
-        <div class="stat-value">{n_seg:,}</div>
-        <div class="stat-label">Segments</div>
-    </div>""", unsafe_allow_html=True)
-with s2:
-    val = f"${avg_gcv:.0f}" if avg_gcv is not None else "—"
-    st.markdown(f"""<div class="stat-container">
-        <div class="stat-value">{val}</div>
-        <div class="stat-label">Avg GCV</div>
-    </div>""", unsafe_allow_html=True)
-with s3:
-    val = f"${avg_ltv:.0f}" if avg_ltv is not None else "—"
-    st.markdown(f"""<div class="stat-container">
-        <div class="stat-value">{val}</div>
-        <div class="stat-label">Avg Derived LTV</div>
-    </div>""", unsafe_allow_html=True)
-with s4:
-    gap_sign = "+" if (avg_gap or 0) > 0 else ""
-    val      = f"{gap_sign}${avg_gap:.0f}" if avg_gap is not None else "—"
-    color    = "#e05c8a" if (avg_gap or 0) > 0 else "#3dd68c"
-    st.markdown(f"""<div class="stat-container">
-        <div class="stat-value" style="color:{color};">{val}</div>
-        <div class="stat-label">Avg GCV–LTV Gap</div>
-    </div>""", unsafe_allow_html=True)
-with s5:
-    val = f"{avg_act:.1f}%" if avg_act is not None else "—"
-    st.markdown(f"""<div class="stat-container">
-        <div class="stat-value">{val}</div>
-        <div class="stat-label">Activation Rate</div>
-    </div>""", unsafe_allow_html=True)
+    # ── KPI row ───────────────────────────────────────────────────────────────
+    n_seg   = len(ltv_agg)
+    avg_gcv = ltv_agg["avg_gcv"].mean() if n_seg > 0 else None
+    avg_ltv = ltv_agg["avg_ltv"].mean() if n_seg > 0 else None
+    avg_gap = ltv_agg["avg_gap"].mean() if n_seg > 0 else None
+    avg_act = ltv["activated_ind"].mean() * 100 if len(ltv) > 0 else None
 
-st.markdown("<div style='margin-bottom:1.5rem;'></div>", unsafe_allow_html=True)
+    s1, s2, s3, s4, s5 = st.columns(5)
+    with s1:
+        st.markdown(f"""<div class="stat-container">
+            <div class="stat-value">{n_seg:,}</div>
+            <div class="stat-label">Segments</div>
+        </div>""", unsafe_allow_html=True)
+    with s2:
+        val = f"${avg_gcv:.0f}" if avg_gcv is not None else "—"
+        st.markdown(f"""<div class="stat-container">
+            <div class="stat-value">{val}</div>
+            <div class="stat-label">Avg GCV</div>
+        </div>""", unsafe_allow_html=True)
+    with s3:
+        val = f"${avg_ltv:.0f}" if avg_ltv is not None else "—"
+        st.markdown(f"""<div class="stat-container">
+            <div class="stat-value">{val}</div>
+            <div class="stat-label">Avg Derived LTV</div>
+        </div>""", unsafe_allow_html=True)
+    with s4:
+        gap_sign = "+" if (avg_gap or 0) > 0 else ""
+        val      = f"{gap_sign}${avg_gap:.0f}" if avg_gap is not None else "—"
+        color    = "#e05c8a" if (avg_gap or 0) > 0 else "#3dd68c"
+        st.markdown(f"""<div class="stat-container">
+            <div class="stat-value" style="color:{color};">{val}</div>
+            <div class="stat-label">Avg GCV–LTV Gap</div>
+        </div>""", unsafe_allow_html=True)
+    with s5:
+        val = f"{avg_act:.1f}%" if avg_act is not None else "—"
+        st.markdown(f"""<div class="stat-container">
+            <div class="stat-value">{val}</div>
+            <div class="stat-label">Activation Rate</div>
+        </div>""", unsafe_allow_html=True)
 
-# =============================================================================
-# SECTION 1 — GCV vs LTV Rank Scatter  (LTV data)
-# =============================================================================
+    st.markdown("<div style='margin-bottom:1.5rem;'></div>", unsafe_allow_html=True)
 
-st.markdown("<p class='section-header'>01 · Rank Comparison</p>", unsafe_allow_html=True)
-st.markdown("### GCV Percentile vs LTV Percentile")
+    # ── Section 1: Rank Scatter ───────────────────────────────────────────────
+    st.markdown("<p class='section-header'>01 · Rank Comparison</p>", unsafe_allow_html=True)
+    st.markdown("### GCV Percentile vs LTV Percentile")
 
-if n_seg == 0:
-    st.warning("No data matches the selected filters.")
-else:
-    fig1 = go.Figure()
-
-    fig1.add_trace(go.Scatter(
-        x=[0, 1], y=[0, 1],
-        mode="lines",
-        line=dict(color="#3a4060", width=1.5, dash="dash"),
-        hoverinfo="skip", showlegend=False,
-    ))
-
-    for val in color_values:
-        subset = ltv_agg[ltv_agg[color_col] == val]
-        if subset.empty:
-            continue
-        hover_text = [
-            f"<b>{r.agent_dim} · {r.product_dim} · {r.customer_dim}</b><br>"
-            f"GCV Rank: {r.gcv_pct_rank:.4f}<br>"
-            f"LTV Rank: {r.ltv_pct_rank:.4f}<br>"
-            f"Avg GCV: ${r.avg_gcv:.2f}<br>"
-            f"Avg LTV: ${r.avg_ltv:.2f}<br>"
-            f"Avg Gap: ${r.avg_gap:.2f}<br>"
-            f"Orders: {int(r.total_orders):,}<br>"
-            f"Activation: {r.activation_rate * 100:.1f}%"
-            for r in subset.itertuples()
-        ]
+    if n_seg == 0:
+        st.warning("No data matches the selected filters.")
+    else:
+        fig1 = go.Figure()
         fig1.add_trace(go.Scatter(
-            x=subset["gcv_pct_rank"],
-            y=subset["ltv_pct_rank"],
-            mode="markers",
-            name=str(val),
-            marker=dict(color=color_map[val], size=11, opacity=0.92, line=dict(width=0)),
-            text=hover_text,
-            hovertemplate="%{text}<extra></extra>",
+            x=[0, 1], y=[0, 1], mode="lines",
+            line=dict(color="#3a4060", width=1.5, dash="dash"),
+            hoverinfo="skip", showlegend=False,
         ))
+        for val in color_values:
+            subset = ltv_agg[ltv_agg[color_col] == val]
+            if subset.empty:
+                continue
+            hover_text = [
+                f"<b>{r.agent_dim} · {r.product_dim} · {r.customer_dim}</b><br>"
+                f"GCV Rank: {r.gcv_pct_rank:.4f}<br>"
+                f"LTV Rank: {r.ltv_pct_rank:.4f}<br>"
+                f"Avg GCV: ${r.avg_gcv:.2f}<br>"
+                f"Avg LTV: ${r.avg_ltv:.2f}<br>"
+                f"Avg Gap: ${r.avg_gap:.2f}<br>"
+                f"Orders: {int(r.total_orders):,}<br>"
+                f"Activation: {r.activation_rate * 100:.1f}%"
+                for r in subset.itertuples()
+            ]
+            fig1.add_trace(go.Scatter(
+                x=subset["gcv_pct_rank"], y=subset["ltv_pct_rank"],
+                mode="markers", name=str(val),
+                marker=dict(color=color_map[val], size=11, opacity=0.92, line=dict(width=0)),
+                text=hover_text, hovertemplate="%{text}<extra></extra>",
+            ))
+        fig1.update_layout(
+            **COMMON_LAYOUT, height=480, legend=make_legend(sel_color_by),
+            xaxis=dict(title=dict(text="GCV NORMALIZED RANK (0–1)",
+                                  font=dict(size=11, color="#6b7280")),
+                       range=[-0.02, 1.02], **AXIS_STYLE),
+            yaxis=dict(title=dict(text="LTV NORMALIZED RANK (0–1)",
+                                  font=dict(size=11, color="#6b7280")),
+                       range=[-0.02, 1.02], **AXIS_STYLE),
+            annotations=[dict(x=0.98, y=1.01, text="GCV = LTV", showarrow=False,
+                               font=dict(size=10, color="#3a4060",
+                                         family="DM Mono, monospace"),
+                               xanchor="right")],
+        )
+        st.plotly_chart(fig1, use_container_width=True)
 
-    fig1.update_layout(
-        **COMMON_LAYOUT,
-        height=480,
-        legend=make_legend(sel_color_by),
-        xaxis=dict(
-            title=dict(text="GCV NORMALIZED RANK (0–1)", font=dict(size=11, color="#6b7280")),
-            range=[-0.02, 1.02], **AXIS_STYLE,
-        ),
-        yaxis=dict(
-            title=dict(text="LTV NORMALIZED RANK (0–1)", font=dict(size=11, color="#6b7280")),
-            range=[-0.02, 1.02], **AXIS_STYLE,
-        ),
-        annotations=[dict(
-            x=0.98, y=1.01, text="GCV = LTV",
-            showarrow=False,
-            font=dict(size=10, color="#3a4060", family="DM Mono, monospace"),
-            xanchor="right",
-        )],
+    # ── Section 2: Survival Curve Fan ─────────────────────────────────────────
+    st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
+    st.markdown("<p class='section-header'>02 · Survival Curve Fan</p>", unsafe_allow_html=True)
+    st.markdown("### Survival Curve Fan")
+    st.markdown(
+        "<p style='font-family:DM Mono,monospace;font-size:0.68rem;color:#6b7280;"
+        "margin-top:-8px;margin-bottom:16px;'>"
+        "Monthly survival trajectory per segment — months 1 through 12</p>",
+        unsafe_allow_html=True,
     )
-    st.plotly_chart(fig1, use_container_width=True)
 
+    surv_month_cols = [f"surv_m{m}" for m in range(1, 13) if f"surv_m{m}" in surv_agg.columns]
 
-# =============================================================================
-# SECTION 2 — Survival Curve Fan  (Survival data — all 12 months)
-# =============================================================================
-
-st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
-st.markdown("<p class='section-header'>02 · Survival Curve Fan</p>", unsafe_allow_html=True)
-st.markdown("### Survival Curve Fan")
-st.markdown(
-    "<p style='font-family:DM Mono,monospace;font-size:0.68rem;color:#6b7280;"
-    "margin-top:-8px;margin-bottom:16px;'>"
-    "Monthly survival trajectory per segment — months 1 through 12</p>",
-    unsafe_allow_html=True,
-)
-
-surv_month_cols = [f"surv_m{m}" for m in range(1, 13) if f"surv_m{m}" in surv_agg.columns]
-
-if surv_agg.empty or not surv_month_cols:
-    st.warning("No survival data matches the selected filters.")
-else:
-    x_labels = [f"M{m}" for m in range(1, len(surv_month_cols) + 1)]
-
-    fig2 = go.Figure()
-
-    overall_median = [surv_agg[c].median() * 100 for c in surv_month_cols]
-    fig2.add_trace(go.Scatter(
-        x=x_labels, y=overall_median,
-        mode="lines",
-        name="Overall Median",
-        line=dict(color="#3a4060", width=2, dash="dot"),
-        hovertemplate="Overall median: %{y:.1f}%<extra></extra>",
-    ))
-
-    for val in surv_color_values:
-        subset = surv_agg[surv_agg[color_col] == val]
-        if subset.empty:
-            continue
-        weights = subset["total_orders"]
-        w_sum   = weights.sum()
-        curve = []
-        for c in surv_month_cols:
-            wvals = subset[c]
-            wmean = (wvals * weights).sum() / w_sum if w_sum > 0 else wvals.mean()
-            curve.append(wmean * 100)
-
+    if surv_agg.empty or not surv_month_cols:
+        st.warning("No survival data matches the selected filters.")
+    else:
+        x_labels = [f"M{m}" for m in range(1, len(surv_month_cols) + 1)]
+        fig2 = go.Figure()
+        overall_median = [surv_agg[c].median() * 100 for c in surv_month_cols]
         fig2.add_trace(go.Scatter(
-            x=x_labels, y=curve,
-            mode="lines+markers",
-            name=str(val),
-            line=dict(color=surv_color_map[val], width=2.5),
-            marker=dict(color=surv_color_map[val], size=7),
-            hovertemplate=f"<b>{val}</b><br>Month: %{{x}}<br>Survival: %{{y:.1f}}%<extra></extra>",
+            x=x_labels, y=overall_median, mode="lines",
+            name="Overall Median",
+            line=dict(color="#3a4060", width=2, dash="dot"),
+            hovertemplate="Overall median: %{y:.1f}%<extra></extra>",
         ))
+        for val in surv_color_values:
+            subset  = surv_agg[surv_agg[color_col] == val]
+            if subset.empty:
+                continue
+            weights = subset["total_orders"]
+            w_sum   = weights.sum()
+            curve = []
+            for c in surv_month_cols:
+                wvals = subset[c]
+                wmean = (wvals * weights).sum() / w_sum if w_sum > 0 else wvals.mean()
+                curve.append(wmean * 100)
+            fig2.add_trace(go.Scatter(
+                x=x_labels, y=curve, mode="lines+markers", name=str(val),
+                line=dict(color=surv_color_map[val], width=2.5),
+                marker=dict(color=surv_color_map[val], size=7),
+                hovertemplate=f"<b>{val}</b><br>Month: %{{x}}<br>Survival: %{{y:.1f}}%<extra></extra>",
+            ))
+        fig2.update_layout(
+            **COMMON_LAYOUT, height=420, legend=make_legend(sel_color_by),
+            xaxis=dict(title=dict(text="MONTH", font=dict(size=11, color="#6b7280")),
+                       **AXIS_STYLE),
+            yaxis=dict(title=dict(text="SURVIVAL RATE (%)", font=dict(size=11, color="#6b7280")),
+                       range=[0, 105], ticksuffix="%", **AXIS_STYLE),
+        )
+        st.plotly_chart(fig2, use_container_width=True)
 
-    fig2.update_layout(
-        **COMMON_LAYOUT,
-        height=420,
-        legend=make_legend(sel_color_by),
-        xaxis=dict(
-            title=dict(text="MONTH", font=dict(size=11, color="#6b7280")),
-            **AXIS_STYLE,
-        ),
-        yaxis=dict(
-            title=dict(text="SURVIVAL RATE (%)", font=dict(size=11, color="#6b7280")),
-            range=[0, 105],
-            ticksuffix="%",
-            **AXIS_STYLE,
-        ),
+    # ── Section 3: Survival vs GCV ────────────────────────────────────────────
+    st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
+    st.markdown("<p class='section-header'>03 · Survival Analysis</p>", unsafe_allow_html=True)
+    st.markdown("### Survival Rate vs Avg GCV")
+
+    surv_col3, _ = st.columns([1, 2])
+    with surv_col3:
+        st.markdown("<p class='plot-label'>Survival Month</p>", unsafe_allow_html=True)
+        sel_survival = st.selectbox(
+            "Survival Month", list(SURVIVAL_OPTIONS.keys()), index=5,
+            label_visibility="collapsed",
+        )
+
+    surv_month_num = SURVIVAL_OPTIONS[sel_survival]
+    surv_plot_col  = f"surv_m{surv_month_num}"
+
+    joined = surv_agg.merge(
+        ltv_agg[["agent_dim", "product_dim", "customer_dim", "avg_gcv"]],
+        on=["agent_dim", "product_dim", "customer_dim"],
+        how="inner",
     )
-    st.plotly_chart(fig2, use_container_width=True)
 
+    if joined.empty or surv_plot_col not in joined.columns:
+        st.warning("No data available for this survival month with current filters.")
+    else:
+        y_vals = joined[surv_plot_col].dropna() * 100
+        y_min  = (int(max(0, y_vals.min() - 3)) // 5) * 5
+        y_max  = min(102, ((int(y_vals.max() + 3) // 5) + 1) * 5)
+        x_vals = joined["avg_gcv"].dropna()
+        x_min  = max(0, x_vals.min() - 5)
+        x_max  = x_vals.max() + 5
+
+        fig3 = go.Figure()
+        for val in surv_color_values:
+            subset = joined[joined[color_col] == val]
+            if subset.empty:
+                continue
+            hover_text = [
+                f"<b>{r.agent_dim} · {r.product_dim} · {r.customer_dim}</b><br>"
+                f"Avg GCV: ${r.avg_gcv:.2f}<br>"
+                f"{sel_survival} Survival: {getattr(r, surv_plot_col) * 100:.1f}%<br>"
+                f"Orders: {int(r.total_orders):,}"
+                for r in subset.itertuples()
+            ]
+            fig3.add_trace(go.Scatter(
+                x=subset["avg_gcv"], y=subset[surv_plot_col] * 100,
+                mode="markers", name=str(val),
+                marker=dict(color=surv_color_map[val], size=11, opacity=0.92,
+                            line=dict(width=0)),
+                text=hover_text, hovertemplate="%{text}<extra></extra>",
+            ))
+        fig3.update_layout(
+            **COMMON_LAYOUT, height=480, legend=make_legend(sel_color_by),
+            xaxis=dict(title=dict(text="AVG GCV ($)", font=dict(size=11, color="#6b7280")),
+                       range=[x_min, x_max], tickprefix="$", **AXIS_STYLE),
+            yaxis=dict(title=dict(text=f"{sel_survival.upper()} SURVIVAL RATE (%)",
+                                  font=dict(size=11, color="#6b7280")),
+                       range=[y_min, y_max], ticksuffix="%", **AXIS_STYLE),
+        )
+        st.plotly_chart(fig3, use_container_width=True)
+
+    # ── Footer ────────────────────────────────────────────────────────────────
+    st.markdown(
+        f"<p style='font-family:DM Mono,monospace;font-size:0.65rem;color:#3a4060;"
+        f"text-transform:uppercase;letter-spacing:0.08em;text-align:center;margin-top:2rem;'>"
+        f"LTV: {len(ltv_raw):,} rows · Survival: {len(survival_raw):,} rows</p>",
+        unsafe_allow_html=True,
+    )
 
 # =============================================================================
-# SECTION 3 — Survival Rate vs Avg GCV  (Survival data)
+# TAB 2 — METHODOLOGY
 # =============================================================================
 
-st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
-st.markdown("<p class='section-header'>03 · Survival Analysis</p>", unsafe_allow_html=True)
-st.markdown("### Survival Rate vs Avg GCV")
+with tab_methodology:
 
-surv_col3, _ = st.columns([1, 2])
-with surv_col3:
-    st.markdown("<p class='plot-label'>Survival Month</p>", unsafe_allow_html=True)
-    sel_survival = st.selectbox(
-        "Survival Month",
-        list(SURVIVAL_OPTIONS.keys()),
-        index=5,   # default M6
-        label_visibility="collapsed",
+    METHODOLOGY_FILE = os.path.join(os.path.dirname(__file__), "pipeline_methodology.md")
+
+    st.markdown("# GCV vs LTV Pipeline — Methodology")
+    st.markdown(
+        "<p style='font-family:DM Mono,monospace;font-size:0.72rem;color:#6b7280;"
+        "letter-spacing:0.08em;text-transform:uppercase;margin-top:-12px;margin-bottom:8px;'>"
+        "How the analysis works</p>",
+        unsafe_allow_html=True,
     )
+    st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
-surv_month_num = SURVIVAL_OPTIONS[sel_survival]
-surv_plot_col  = f"surv_m{surv_month_num}"
+    if os.path.exists(METHODOLOGY_FILE):
+        with open(METHODOLOGY_FILE, "r") as f:
+            methodology_md = f.read()
 
-# Join avg_gcv from LTV agg onto survival agg for x-axis
-joined = surv_agg.merge(
-    ltv_agg[["agent_dim", "product_dim", "customer_dim", "avg_gcv"]],
-    on=["agent_dim", "product_dim", "customer_dim"],
-    how="inner",
-)
+        # Render section by section so we can inject callout boxes
+        # between the major sections for quick-reference highlights
+        sections = methodology_md.split("\n---\n")
 
-if joined.empty or surv_plot_col not in joined.columns:
-    st.warning("No data available for this survival month with current filters.")
-else:
-    y_vals = joined[surv_plot_col].dropna() * 100
-    y_min  = (int(max(0, y_vals.min() - 3)) // 5) * 5
-    y_max  = min(102, ((int(y_vals.max() + 3) // 5) + 1) * 5)
-    x_vals = joined["avg_gcv"].dropna()
-    x_min  = max(0, x_vals.min() - 5)
-    x_max  = x_vals.max() + 5
-
-    fig3 = go.Figure()
-
-    for val in surv_color_values:
-        subset = joined[joined[color_col] == val]
-        if subset.empty:
-            continue
-        hover_text = [
-            f"<b>{r.agent_dim} · {r.product_dim} · {r.customer_dim}</b><br>"
-            f"Avg GCV: ${r.avg_gcv:.2f}<br>"
-            f"{sel_survival} Survival: {getattr(r, surv_plot_col) * 100:.1f}%<br>"
-            f"Orders: {int(r.total_orders):,}"
-            for r in subset.itertuples()
+        callouts = [
+            None,  # Overview — no callout
+            "<div class='method-callout'>📅 <b>Survival cohort:</b> Sep–Dec 2024 · 12-month flags · historical benchmark<br>📅 <b>LTV cohort:</b> Mar–Jul 2025 · 6-month cap · current order valuation</div>",
+            "<div class='method-callout'>🏠 Rentcast enrichment → 🌡️ Weather features → 💬 Call survey inputs → ⚙️ Feature engineering → 🤖 LightGBM scoring → kWh per month per call</div>",
+            "<div class='method-callout'>💰 <b>Derived LTV</b> = Upfront bounty (where earned) + Σ(residual_mN × mil_rate / 1000 × survived_mN) for N in 1–6</div>",
+            None,  # Agent quartiles — no callout
+            None,  # Key design choices — no callout
         ]
-        fig3.add_trace(go.Scatter(
-            x=subset["avg_gcv"],
-            y=subset[surv_plot_col] * 100,
-            mode="markers",
-            name=str(val),
-            marker=dict(color=surv_color_map[val], size=11, opacity=0.92, line=dict(width=0)),
-            text=hover_text,
-            hovertemplate="%{text}<extra></extra>",
-        ))
 
-    fig3.update_layout(
-        **COMMON_LAYOUT,
-        height=480,
-        legend=make_legend(sel_color_by),
-        xaxis=dict(
-            title=dict(text="AVG GCV ($)", font=dict(size=11, color="#6b7280")),
-            range=[x_min, x_max],
-            tickprefix="$",
-            **AXIS_STYLE,
-        ),
-        yaxis=dict(
-            title=dict(text=f"{sel_survival.upper()} SURVIVAL RATE (%)", font=dict(size=11, color="#6b7280")),
-            range=[y_min, y_max],
-            ticksuffix="%",
-            **AXIS_STYLE,
-        ),
-    )
-    st.plotly_chart(fig3, use_container_width=True)
+        for i, section in enumerate(sections):
+            st.markdown(
+                f"<div class='methodology-body'>{section}</div>",
+                unsafe_allow_html=True,
+            )
+            if i < len(callouts) and callouts[i]:
+                st.markdown(callouts[i], unsafe_allow_html=True)
 
-
-# ── Footer ────────────────────────────────────────────────────────────────────
-st.markdown(
-    f"<p style='font-family:DM Mono,monospace;font-size:0.65rem;color:#3a4060;"
-    f"text-transform:uppercase;letter-spacing:0.08em;text-align:center;margin-top:2rem;'>"
-    f"LTV: {len(ltv_raw):,} rows · Survival: {len(survival_raw):,} rows</p>",
-    unsafe_allow_html=True,
-)
+    else:
+        st.info(
+            "Methodology file `pipeline_methodology.md` not found in the app directory. "
+            "Place it alongside `app.py` to render it here.",
+            icon="📄",
+        )
