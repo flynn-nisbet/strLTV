@@ -481,7 +481,9 @@ surv_color_map    = {v: PALETTES[i % len(PALETTES)] for i, v in enumerate(surv_c
 # TABS
 # =============================================================================
 
-tab_dashboard, tab_methodology = st.tabs(["📊  Dashboard", "📖  Methodology"])
+tab_dashboard, tab_methodology, tab_takeaways = st.tabs([
+    "📊  Dashboard", "📖  Methodology", "📋  Takeaways"
+])
 
 # =============================================================================
 # TAB 1 — DASHBOARD
@@ -758,3 +760,330 @@ with tab_methodology:
             "Place it alongside `app.py` to render it here.",
             icon="📄",
         )
+
+# =============================================================================
+# TAB 3 — TAKEAWAYS
+# =============================================================================
+
+# =============================================================================
+# TAB 3 — TAKEAWAYS
+# =============================================================================
+
+with tab_takeaways:
+
+    st.markdown("# Key Takeaways")
+    st.markdown(
+        "<p style='font-family:DM Mono,monospace;font-size:0.72rem;color:#6b7280;"
+        "letter-spacing:0.08em;text-transform:uppercase;margin-top:-12px;margin-bottom:8px;'>"
+        "Where static LTV assumptions diverge most from dynamic model output</p>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
+
+    st.markdown(
+        "<p class='section-header'>Proof Point — Similar GCV, Divergent LTV</p>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "### Segments with Similar GCV Rank but Dramatically Different LTV Rank"
+    )
+    st.markdown(
+        "<p style='font-family:DM Mono,monospace;font-size:0.68rem;color:#6b7280;"
+        "margin-top:-8px;margin-bottom:16px;'>"
+        "Computed across every agent × product × customer dimension combination. "
+        "Segments with at least 100 orders, ordered by largest rank divergence. "
+        "Segments a static model would treat as equivalent that the dynamic model "
+        "separates most appear at the top."
+        "</p>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Build aggregation across ALL dimension combinations ───────────────────
+    all_agent_cols    = list(AGENT_DIMS.values())
+    all_product_cols  = list(PRODUCT_DIMS.values())
+    all_customer_cols = list(CUSTOMER_DIMS.values())
+
+    agent_label_map    = {v: k for k, v in AGENT_DIMS.items()}
+    product_label_map  = {v: k for k, v in PRODUCT_DIMS.items()}
+    customer_label_map = {v: k for k, v in CUSTOMER_DIMS.items()}
+
+    combo_frames = []
+
+    for a_col in all_agent_cols:
+        for p_col in all_product_cols:
+            for c_col in all_customer_cols:
+
+                ltv_has = all(c in ltv_raw.columns for c in [a_col, p_col, c_col])
+                if not ltv_has:
+                    continue
+
+                grp = (
+                    ltv_raw
+                    .dropna(subset=[a_col, p_col, c_col])
+                    .groupby([a_col, p_col, c_col])
+                    .agg(
+                        total_orders    = ("gcv",                  "count"),
+                        avg_gcv         = ("gcv",                  "mean"),
+                        avg_ltv         = ("derived_ltv",          "mean"),
+                        avg_upfront     = ("ltv_upfront_realized", "mean"),
+                        avg_trailing    = ("trailing_revenue",     "mean"),
+                        avg_gap         = ("gcv_ltv_gap",          "mean"),
+                        activation_rate = ("activated_ind",        "mean"),
+                        first_pmt_rate  = ("first_payment_ind",    "mean"),
+                        surv_m1         = ("survived_m1",          "mean"),
+                        surv_m2         = ("survived_m2",          "mean"),
+                        surv_m3         = ("survived_m3",          "mean"),
+                        surv_m4         = ("survived_m4",          "mean"),
+                        surv_m5         = ("survived_m5",          "mean"),
+                        surv_m6         = ("survived_m6",          "mean"),
+                    )
+                    .reset_index()
+                    .rename(columns={
+                        a_col: "dim_agent",
+                        p_col: "dim_product",
+                        c_col: "dim_customer",
+                    })
+                )
+
+                grp["agent_field"]    = a_col
+                grp["product_field"]  = p_col
+                grp["customer_field"] = c_col
+                grp["combo_label"]    = (
+                    f"{agent_label_map.get(a_col, a_col)} × "
+                    f"{product_label_map.get(p_col, p_col)} × "
+                    f"{customer_label_map.get(c_col, c_col)}"
+                )
+
+                combo_frames.append(grp)
+
+    if not combo_frames:
+        st.warning("Could not build any dimension combinations from the loaded data.")
+    else:
+        proof_agg = pd.concat(combo_frames, ignore_index=True)
+
+        # ── Volume filter ─────────────────────────────────────────────────────
+        proof_agg = proof_agg[proof_agg["total_orders"] >= 100].copy()
+
+        # ── Percentile ranks across full stacked population ───────────────────
+        proof_agg["gcv_pct_rank"]   = proof_agg["avg_gcv"].rank(pct=True).round(4)
+        proof_agg["ltv_pct_rank"]   = proof_agg["avg_ltv"].rank(pct=True).round(4)
+        proof_agg["rank_delta"]     = (proof_agg["gcv_pct_rank"] - proof_agg["ltv_pct_rank"]).round(4)
+        proof_agg["rank_delta_abs"] = proof_agg["rank_delta"].abs()
+
+        proof_agg["seg_label"] = (
+            proof_agg["dim_agent"].astype(str) + " · " +
+            proof_agg["dim_product"].astype(str) + " · " +
+            proof_agg["dim_customer"].astype(str)
+        )
+        proof_agg["seg_key"] = (
+            proof_agg["agent_field"].astype(str) + "||" +
+            proof_agg["dim_agent"].astype(str) + "||" +
+            proof_agg["product_field"].astype(str) + "||" +
+            proof_agg["dim_product"].astype(str) + "||" +
+            proof_agg["customer_field"].astype(str) + "||" +
+            proof_agg["dim_customer"].astype(str)
+        )
+
+        # ── All segments ordered by rank delta, top 5 for scatter highlight ───
+        all_divergers = proof_agg.sort_values("rank_delta_abs", ascending=False).copy()
+        top_divergers = all_divergers.head(5).copy()
+
+        if all_divergers.empty:
+            st.warning(
+                "No segments found with ≥100 orders. "
+                "Check that both CSVs are loaded correctly."
+            )
+        else:
+            # ── Callout ───────────────────────────────────────────────────────
+            best = all_divergers.iloc[0]
+
+            st.markdown(
+                f"<div class='method-callout'>"
+                f"📍 <b>Largest divergence found:</b> "
+                f"<b>{best['combo_label']}</b><br>"
+                f"<b>{best['dim_agent']} · {best['dim_product']} · {best['dim_customer']}</b><br>"
+                f"GCV rank <b>{best['gcv_pct_rank']:.2f}</b> → "
+                f"LTV rank <b>{best['ltv_pct_rank']:.2f}</b> "
+                f"(Δ <b>{best['rank_delta']:+.2f}</b>) &nbsp;·&nbsp; "
+                f"Avg GCV <b>${best['avg_gcv']:,.0f}</b> → "
+                f"Avg LTV <b>${best['avg_ltv']:,.0f}</b><br>"
+                f"Activation: <b>{best['activation_rate'] * 100:.1f}%</b> &nbsp;·&nbsp; "
+                f"M6 Survival: <b>{best['surv_m6'] * 100:.1f}%</b> &nbsp;·&nbsp; "
+                f"Avg Trailing Rev: <b>${best['avg_trailing']:,.0f}</b> &nbsp;·&nbsp; "
+                f"Orders: <b>{int(best['total_orders']):,}</b>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            # ── Full scrollable table ─────────────────────────────────────────
+            table = all_divergers[[
+                "combo_label",
+                "dim_agent", "dim_product", "dim_customer",
+                "total_orders",
+                "avg_gcv", "avg_ltv",
+                "gcv_pct_rank", "ltv_pct_rank", "rank_delta",
+            ]].copy().reset_index(drop=True)
+
+            table["avg_gcv"]      = table["avg_gcv"].apply(lambda x: f"${x:,.0f}")
+            table["avg_ltv"]      = table["avg_ltv"].apply(lambda x: f"${x:,.0f}")
+            table["gcv_pct_rank"] = table["gcv_pct_rank"].apply(lambda x: f"{x:.3f}")
+            table["ltv_pct_rank"] = table["ltv_pct_rank"].apply(lambda x: f"{x:.3f}")
+            table["rank_delta"]   = table["rank_delta"].apply(lambda x: f"{x:+.3f}")
+
+            table = table.rename(columns={
+                "combo_label":  "Grouping",
+                "dim_agent":    "Agent Value",
+                "dim_product":  "Product Value",
+                "dim_customer": "Customer Value",
+                "total_orders": "Orders",
+                "avg_gcv":      "Avg GCV",
+                "avg_ltv":      "Avg LTV",
+                "gcv_pct_rank": "GCV Rank",
+                "ltv_pct_rank": "LTV Rank",
+                "rank_delta":   "Rank Δ",
+            })
+
+            def color_rank_delta(val):
+                try:
+                    v = float(val)
+                    if v > 0.15:
+                        return "color: #e05c8a; font-weight: bold"
+                    elif v < -0.15:
+                        return "color: #3dd68c; font-weight: bold"
+                    return "color: #e8eaf0"
+                except Exception:
+                    return ""
+
+            styled = (
+                table.style
+                .map(color_rank_delta, subset=["Rank Δ"])
+                .set_properties(**{
+                    "font-family": "DM Mono, monospace",
+                    "font-size":   "0.82rem",
+                })
+            )
+
+            st.dataframe(styled, use_container_width=True, hide_index=True,
+                         height=420)
+
+            # ── Scatter ───────────────────────────────────────────────────────
+            st.markdown("<div style='margin-top:2rem;'></div>", unsafe_allow_html=True)
+            st.markdown(
+                "<p class='section-header'>All Segments — Rank Divergence Map</p>",
+                unsafe_allow_html=True,
+            )
+            st.markdown("### GCV Rank vs LTV Rank · All Dimension Combinations")
+            st.markdown(
+                "<p style='font-family:DM Mono,monospace;font-size:0.68rem;color:#6b7280;"
+                "margin-top:-8px;margin-bottom:16px;'>"
+                "Points on the diagonal satisfy the static model assumption. "
+                "Orange highlighted points are the top 5 divergers.</p>",
+                unsafe_allow_html=True,
+            )
+
+            highlight_keys = set(top_divergers["seg_key"])
+            proof_agg["is_highlight"] = proof_agg["seg_key"].isin(highlight_keys)
+
+            bg = proof_agg[~proof_agg["is_highlight"]].copy()
+            hi = proof_agg[proof_agg["is_highlight"]].copy()
+
+            fig_proof = go.Figure()
+
+            fig_proof.add_trace(go.Scatter(
+                x=[0, 1], y=[0, 1], mode="lines",
+                line=dict(color="#3a4060", width=1.5, dash="dash"),
+                hoverinfo="skip", showlegend=False,
+            ))
+
+            fig_proof.add_trace(go.Scatter(
+                x=bg["gcv_pct_rank"],
+                y=bg["ltv_pct_rank"],
+                mode="markers",
+                name="All other segments",
+                marker=dict(color="#2a3050", size=8, opacity=0.7, line=dict(width=0)),
+                text=[
+                    f"<b>{r.seg_label}</b><br>"
+                    f"Grouping: {r.combo_label}<br>"
+                    f"GCV Rank: {r.gcv_pct_rank:.3f}<br>"
+                    f"LTV Rank: {r.ltv_pct_rank:.3f}<br>"
+                    f"Rank Δ: {r.rank_delta:+.3f}<br>"
+                    f"Avg GCV: ${r.avg_gcv:,.0f}<br>"
+                    f"Avg LTV: ${r.avg_ltv:,.0f}<br>"
+                    f"Activation: {r.activation_rate * 100:.1f}%<br>"
+                    f"M6 Survival: {r.surv_m6 * 100:.1f}%<br>"
+                    f"Orders: {int(r.total_orders):,}"
+                    for r in bg.itertuples()
+                ],
+                hovertemplate="%{text}<extra></extra>",
+            ))
+
+            fig_proof.add_trace(go.Scatter(
+                x=hi["gcv_pct_rank"],
+                y=hi["ltv_pct_rank"],
+                mode="markers+text",
+                name="Top 5 divergers",
+                marker=dict(
+                    color="#f59e42", size=14, opacity=1.0,
+                    line=dict(color="#e8eaf0", width=1.5),
+                ),
+                text=hi["seg_label"],
+                textposition="top center",
+                textfont=dict(family="DM Mono, monospace", size=9, color="#e8eaf0"),
+                customdata=list(zip(
+                    hi["rank_delta"].round(3),
+                    (hi["surv_m6"] * 100).round(1),
+                    (hi["activation_rate"] * 100).round(1),
+                    hi["total_orders"].astype(int),
+                    hi["avg_gcv"].round(0),
+                    hi["avg_ltv"].round(0),
+                    hi["avg_trailing"].round(0),
+                    hi["combo_label"],
+                )),
+                hovertemplate=(
+                    "<b>%{text}</b><br>"
+                    "Grouping: %{customdata[7]}<br>"
+                    "GCV Rank: %{x:.3f} → LTV Rank: %{y:.3f}<br>"
+                    "Rank Δ: %{customdata[0]:+.3f}<br>"
+                    "Avg GCV: $%{customdata[4]:,.0f} → Avg LTV: $%{customdata[5]:,.0f}<br>"
+                    "Avg Trailing Rev: $%{customdata[6]:,.0f}<br>"
+                    "M6 Survival: %{customdata[1]:.1f}%<br>"
+                    "Activation: %{customdata[2]:.1f}%<br>"
+                    "Orders: %{customdata[3]:,}"
+                    "<extra></extra>"
+                ),
+            ))
+
+            fig_proof.update_layout(
+                **COMMON_LAYOUT,
+                height=520,
+                legend=make_legend("Segment"),
+                xaxis=dict(
+                    title=dict(text="GCV NORMALIZED RANK (0–1)",
+                               font=dict(size=11, color="#6b7280")),
+                    range=[-0.02, 1.18], **AXIS_STYLE,
+                ),
+                yaxis=dict(
+                    title=dict(text="LTV NORMALIZED RANK (0–1)",
+                               font=dict(size=11, color="#6b7280")),
+                    range=[-0.02, 1.02], **AXIS_STYLE,
+                ),
+                annotations=[dict(
+                    x=0.98, y=1.01,
+                    text="Static assumption holds here",
+                    showarrow=False,
+                    font=dict(size=10, color="#3a4060", family="DM Mono, monospace"),
+                    xanchor="right",
+                )],
+            )
+            st.plotly_chart(fig_proof, use_container_width=True)
+
+            # ── Footer ────────────────────────────────────────────────────────
+            st.markdown(
+                "<p style='font-family:DM Mono,monospace;font-size:0.65rem;color:#3a4060;"
+                "text-transform:uppercase;letter-spacing:0.08em;margin-top:1.5rem;'>"
+                "Survival from LTV cohort (Mar–Jul 2025, 6-month cap). "
+                "Segments with &lt;100 orders excluded. "
+                "Ranks computed across all dimension combinations stacked together."
+                "</p>",
+                unsafe_allow_html=True,
+            )
